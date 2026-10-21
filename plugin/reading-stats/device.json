@@ -4,14 +4,16 @@
   "config": { "file": "config.json" },
   "browse": {
     "format": "json",
-    "url": "{cfg.server}/api/catalog?key={cfg.device_key}&page={page}&limit={limit}",
+    "url": "{cfg.server}/api/catalog?page={page}&limit={limit}",
     "method": "GET",
+    "headers": { "X-Device-Key": "{cfg.device_key}" },
     "items": "items",
     "page_size": 12,
     "fields": {
       "title": "title",
       "author": "subtitle",
-      "id": "id"
+      "id": "id",
+      "description": "description"
     }
   },
   "events": {
