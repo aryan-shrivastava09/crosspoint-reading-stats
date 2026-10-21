@@ -2,47 +2,28 @@ const json=(x,s=200)=>new Response(JSON.stringify(x),{status:s,headers:{'content
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const safeInt=(v)=>Number.isFinite(Number(v))?Math.trunc(Number(v)):0;
 const dur=(s)=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h?`${h}h ${String(m).padStart(2,'0')}m`:`${m} min`};
+const shortDur=(s)=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h?`${h}h${m?String(m).padStart(2,'0')+'m':''}`:`${m}m`};
 const utcDay=(ts)=>new Date(ts*1000).toISOString().slice(0,10);
-const activityBar=(seconds,max)=>{const slots=12,n=seconds>0&&max?Math.max(1,Math.round(clamp(seconds/max,0,1)*slots)):0;return `${'='.repeat(n)}${'-'.repeat(slots-n)}`};
-const progressBar=(pct)=>{const slots=18,n=Math.round(clamp(pct,0,100)/100*slots);return `${'='.repeat(n)}${'-'.repeat(slots-n)}  ${Math.round(pct)}%`};
+const bar=(value,max,slots=12,empty='-')=>{const n=value>0&&max?Math.max(1,Math.round(clamp(value/max,0,1)*slots)):0;return `${'='.repeat(n)}${empty.repeat(slots-n)}`};
+const progressBar=(pct)=>`${bar(clamp(pct,0,100),100,18)}  ${Math.round(pct)}%`;
 const cleanTitle=(p)=>String(p||'Unknown book').split('/').pop().replace(/\.(epub|pdf|txt|fb2|mobi)$/i,'');
+const DAILY_GOAL_SEC=45*60;
 
-export default {async fetch(req,env){
-  const u=new URL(req.url);
-  if(u.pathname==='/health') return json({ok:true});
-  if(u.pathname==='/api/session'&&req.method==='POST') return ingest(req,env);
-  if(u.pathname==='/api/catalog'&&req.method==='GET') return catalog(req,u,env);
-  return json({error:'not found'},404);
-}};
-
-async function ingest(req,env){
-  const key=(req.headers.get('X-Device-Key')||'').trim();
-  if(key.length<16) return json({error:'invalid device key'},401);
-  let x; try{x=await req.json()}catch{return json({error:'invalid json'},400)}
-  const eventId=String(x.event_id||'').slice(0,128),book=String(x.book||'').slice(0,512),doc=String(x.document||'').slice(0,64);
-  const st=safeInt(x.start_time),et=safeInt(x.end_time),sec=clamp(safeInt(x.duration_seconds),0,86400),sp=clamp(safeInt(x.start_progress_bp),0,10000),ep=clamp(safeInt(x.end_progress_bp),0,10000),ets=safeInt(x.event_ts);
-  if(!eventId||!book||st<=0||et<=st||sec<10) return json({error:'invalid session'},400);
-  await env.DB.prepare(`INSERT OR IGNORE INTO sessions(device_key,event_id,book,document,start_time,end_time,duration_seconds,start_progress_bp,end_progress_bp,event_ts,received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(key,eventId,book,doc,st,et,sec,sp,ep,ets,Math.floor(Date.now()/1000)).run();
-  return json({ok:true});
-}
-
+export default {async fetch(req,env){const u=new URL(req.url);if(u.pathname==='/health')return json({ok:true});if(u.pathname==='/api/session'&&req.method==='POST')return ingest(req,env);if(u.pathname==='/api/catalog'&&req.method==='GET')return catalog(req,u,env);return json({error:'not found'},404)}};
+async function ingest(req,env){const key=(req.headers.get('X-Device-Key')||'').trim();if(key.length<16)return json({error:'invalid device key'},401);let x;try{x=await req.json()}catch{return json({error:'invalid json'},400)}const eventId=String(x.event_id||'').slice(0,128),book=String(x.book||'').slice(0,512),doc=String(x.document||'').slice(0,64);const st=safeInt(x.start_time),et=safeInt(x.end_time),sec=clamp(safeInt(x.duration_seconds),0,86400),sp=clamp(safeInt(x.start_progress_bp),0,10000),ep=clamp(safeInt(x.end_progress_bp),0,10000),ets=safeInt(x.event_ts);if(!eventId||!book||st<=0||et<=st||sec<10)return json({error:'invalid session'},400);await env.DB.prepare(`INSERT OR IGNORE INTO sessions(device_key,event_id,book,document,start_time,end_time,duration_seconds,start_progress_bp,end_progress_bp,event_ts,received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(key,eventId,book,doc,st,et,sec,sp,ep,ets,Math.floor(Date.now()/1000)).run();return json({ok:true})}
 async function catalog(req,u,env){
-  const key=(req.headers.get('X-Device-Key')||u.searchParams.get('key')||'').trim();
-  if(key.length<16)return json({items:[{id:'setup',title:'Setup required',subtitle:'Check config.json',description:'A valid device key is required.'}]});
-  const now=Math.floor(Date.now()/1000),today=utcDay(now),days=[];
-  for(let i=6;i>=0;i--)days.push(new Date((now-i*86400)*1000).toISOString().slice(0,10));
-  const r=await env.DB.prepare(`SELECT book,document,end_time,duration_seconds,end_progress_bp FROM sessions WHERE device_key=? ORDER BY end_time DESC LIMIT 5000`).bind(key).all();
-  const rows=r.results||[],byDay=Object.fromEntries(days.map(d=>[d,0]));let total=0,todaySec=0,week=0,todayCount=0;const books=new Map();
-  for(const s of rows){const sec=Number(s.duration_seconds)||0,d=utcDay(Number(s.end_time));total+=sec;if(d===today){todaySec+=sec;todayCount++}if(byDay[d]!==undefined){byDay[d]+=sec;week+=sec}const id=s.document||s.book;let b=books.get(id);if(!b)b={book:s.book,sec:0,pct:0,last:0,count:0};b.sec+=sec;b.count++;if(Number(s.end_time)>b.last){b.last=Number(s.end_time);b.pct=(Number(s.end_progress_bp)||0)/100}books.set(id,b)}
-  const todayAvg=todayCount?todaySec/todayCount:0,activeDays=new Set(rows.map(s=>utcDay(Number(s.end_time))));let streak=0;
-  for(let i=0;i<3660;i++){const d=new Date((now-i*86400)*1000).toISOString().slice(0,10);if(activeDays.has(d))streak++;else if(i===0)continue;else break}
-  const max=Math.max(1,...Object.values(byDay)),items=[];
-  items.push({id:'today',title:`TODAY  ${dur(todaySec)}`,subtitle:`${todayCount} session${todayCount===1?'':'s'} | avg ${dur(todayAvg)}`,description:'Reading time recorded today.'});
-  items.push({id:'week',title:`7 DAYS  ${dur(week)}  |  STREAK ${streak}`,subtitle:`Lifetime ${dur(total)}`,description:'Reading activity over the last seven days.'});
-  for(const d of days){const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${activityBar(byDay[d],max)}  ${dur(byDay[d])}`,subtitle:' ',description:`${label}: ${dur(byDay[d])} active reading time.`})}
-  const top=[...books.values()].sort((a,b)=>b.last-a.last).slice(0,3);
-  items.push({id:'books-head',title:'--- RECENT BOOKS ---',subtitle:' ',description:'Your three most recently opened books.'});
-  if(!top.length)items.push({id:'none',title:'No books recorded yet',subtitle:'Read and exit a book to sync progress.',description:'Reading sessions appear here after they are synced.'});
-  for(const b of top){items.push({id:'b-'+b.last,title:cleanTitle(b.book),subtitle:progressBar(b.pct),description:`${Math.round(b.pct)}% complete | ${dur(b.sec)} active reading | ${b.count} session${b.count===1?'':'s'}`})}
-  return json({items});
+ const key=(req.headers.get('X-Device-Key')||u.searchParams.get('key')||'').trim();if(key.length<16)return json({items:[{id:'setup',title:'Setup required',subtitle:'Check config.json',description:'A valid device key is required.'}]});
+ const now=Math.floor(Date.now()/1000),today=utcDay(now),days=[];for(let i=6;i>=0;i--)days.push(new Date((now-i*86400)*1000).toISOString().slice(0,10));
+ const r=await env.DB.prepare(`SELECT book,document,start_time,end_time,duration_seconds,start_progress_bp,end_progress_bp FROM sessions WHERE device_key=? ORDER BY end_time DESC LIMIT 5000`).bind(key).all();
+ const rows=r.results||[],byDay=Object.fromEntries(days.map(d=>[d,0]));let total=0,todaySec=0,week=0,todayCount=0;const books=new Map(),allDays={};
+ for(const s of rows){const sec=Number(s.duration_seconds)||0,d=utcDay(Number(s.end_time));total+=sec;allDays[d]=(allDays[d]||0)+sec;if(d===today){todaySec+=sec;todayCount++}if(byDay[d]!==undefined){byDay[d]+=sec;week+=sec}const id=s.document||s.book;let b=books.get(id);if(!b)b={book:s.book,sec:0,pct:0,last:0,count:0,first:1e20};b.sec+=sec;b.count++;b.first=Math.min(b.first,Number(s.end_time));if(Number(s.end_time)>b.last){b.last=Number(s.end_time);b.pct=(Number(s.end_progress_bp)||0)/100}books.set(id,b)}
+ const todayAvg=todayCount?todaySec/todayCount:0,activeDays=new Set(Object.keys(allDays));let streak=0,longest=0,run=0;const sortedDays=[...activeDays].sort();for(let i=0;i<sortedDays.length;i++){if(i&&((new Date(sortedDays[i])-new Date(sortedDays[i-1]))/86400000===1))run++;else run=1;longest=Math.max(longest,run)}for(let i=0;i<3660;i++){const d=new Date((now-i*86400)*1000).toISOString().slice(0,10);if(activeDays.has(d))streak++;else if(i===0)continue;else break}
+ const scale=Math.max(DAILY_GOAL_SEC,...Object.values(byDay),1),goalPct=clamp(todaySec/DAILY_GOAL_SEC*100,0,100),items=[];
+ items.push({id:'today',title:`TODAY  ${dur(todaySec)}`,subtitle:`${todayCount} session${todayCount===1?'':'s'} | avg ${dur(todayAvg)}`,description:'Reading time recorded today.'});
+ items.push({id:'goal',title:`GOAL  ${bar(todaySec,DAILY_GOAL_SEC,14)}  ${Math.round(goalPct)}%`,subtitle:`${shortDur(todaySec)} / 45m | ${shortDur(Math.max(0,DAILY_GOAL_SEC-todaySec))} left`,description:`Daily reading goal: 45 minutes. ${Math.round(goalPct)}% complete.`});
+ items.push({id:'week',title:`7 DAYS  ${dur(week)} | STREAK ${streak}`,subtitle:`Longest ${longest}d | lifetime ${dur(total)}`,description:'Reading activity over the last seven days.'});
+ for(const d of days){const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${bar(byDay[d],scale,12)}  ${shortDur(byDay[d])}`,subtitle:' ',description:`${label}: ${dur(byDay[d])} active reading time.`})}
+ const top=[...books.values()].sort((a,b)=>b.last-a.last).slice(0,3);items.push({id:'books-head',title:'RECENT BOOKS',subtitle:' ',description:'Your three most recently opened books.'});
+ for(const b of top)items.push({id:'b-'+b.last,title:cleanTitle(b.book),subtitle:progressBar(b.pct),description:`${Math.round(b.pct)}% complete | ${dur(b.sec)} active reading | ${b.count} session${b.count===1?'':'s'}`});
+ return json({items});
 }
