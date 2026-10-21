@@ -1,0 +1,41 @@
+const json=(x,s=200)=>new Response(JSON.stringify(x),{status:s,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}});
+const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+const safeInt=(v)=>Number.isFinite(Number(v))?Math.trunc(Number(v)):0;
+const bar=(seconds,max)=>{const n=max?Math.round(clamp(seconds/max,0,1)*12):0;return '█'.repeat(n)+'░'.repeat(12-n)};
+const dur=(s)=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h?`${h}h ${String(m).padStart(2,'0')}m`:`${m} min`};
+const utcDay=(ts)=>new Date(ts*1000).toISOString().slice(0,10);
+
+export default {async fetch(req,env){
+  const u=new URL(req.url);
+  if(u.pathname==='/health') return json({ok:true});
+  if(u.pathname==='/api/session'&&req.method==='POST') return ingest(req,env);
+  if(u.pathname==='/api/catalog'&&req.method==='GET') return catalog(u,env);
+  return json({error:'not found'},404);
+}};
+
+async function ingest(req,env){
+  const key=(req.headers.get('X-Device-Key')||'').trim();
+  if(key.length<16) return json({error:'invalid device key'},401);
+  let x; try{x=await req.json()}catch{return json({error:'invalid json'},400)}
+  const eventId=String(x.event_id||'').slice(0,128), book=String(x.book||'').slice(0,512), doc=String(x.document||'').slice(0,64);
+  const st=safeInt(x.start_time), et=safeInt(x.end_time), sec=clamp(safeInt(x.duration_seconds),0,86400), sp=clamp(safeInt(x.start_progress_bp),0,10000), ep=clamp(safeInt(x.end_progress_bp),0,10000), ets=safeInt(x.event_ts);
+  if(!eventId||!book||st<=0||et<=st||sec<10) return json({error:'invalid session'},400);
+  await env.DB.prepare(`INSERT OR IGNORE INTO sessions(device_key,event_id,book,document,start_time,end_time,duration_seconds,start_progress_bp,end_progress_bp,event_ts,received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(key,eventId,book,doc,st,et,sec,sp,ep,ets,Math.floor(Date.now()/1000)).run();
+  return json({ok:true});
+}
+
+async function catalog(u,env){
+  const key=(u.searchParams.get('key')||'').trim(); if(key.length<16)return json({items:[{id:'setup',title:'Setup required',subtitle:'Set a long device_key in config.json'}]});
+  const now=Math.floor(Date.now()/1000), today=utcDay(now), days=[]; for(let i=6;i>=0;i--){const d=new Date((now-i*86400)*1000).toISOString().slice(0,10);days.push(d)}
+  const r=await env.DB.prepare(`SELECT book,document,end_time,duration_seconds,end_progress_bp FROM sessions WHERE device_key=? ORDER BY end_time DESC LIMIT 5000`).bind(key).all();
+  const rows=r.results||[], byDay=Object.fromEntries(days.map(d=>[d,0])); let total=0,todaySec=0,week=0; const books=new Map();
+  for(const s of rows){const sec=Number(s.duration_seconds)||0,d=utcDay(Number(s.end_time)); total+=sec;if(d===today)todaySec+=sec;if(byDay[d]!==undefined){byDay[d]+=sec;week+=sec}const id=s.document||s.book;let b=books.get(id);if(!b)b={book:s.book,sec:0,pct:0,last:0,count:0};b.sec+=sec;b.count++;if(Number(s.end_time)>b.last){b.last=Number(s.end_time);b.pct=(Number(s.end_progress_bp)||0)/100}books.set(id,b)}
+  const avg=rows.length?total/rows.length:0, activeDays=new Set(rows.map(s=>utcDay(Number(s.end_time)))); let streak=0;for(let i=0;i<3660;i++){const d=new Date((now-i*86400)*1000).toISOString().slice(0,10);if(activeDays.has(d))streak++;else if(i===0)continue;else break}
+  const max=Math.max(1,...Object.values(byDay)); const items=[];
+  items.push({id:'today',title:`TODAY  ${dur(todaySec)}`,subtitle:`${rows.filter(s=>utcDay(Number(s.end_time))===today).length} sessions · avg ${dur(avg)}`});
+  items.push({id:'week',title:`THIS WEEK  ${dur(week)}`,subtitle:`${streak} day streak · lifetime ${dur(total)}`});
+  items.push({id:'chart',title:'LAST 7 DAYS',subtitle:'Active reading time'});
+  for(const d of days){const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${bar(byDay[d],max)}`,subtitle:dur(byDay[d])})}
+  const top=[...books.values()].sort((a,b)=>b.last-a.last).slice(0,3);if(top.length)items.push({id:'books',title:'RECENT BOOKS',subtitle:'Progress · active time'});for(const b of top){items.push({id:'b-'+b.last,title:`${String(b.book).split('/').pop()}  ${Math.round(b.pct)}%`,subtitle:`${dur(b.sec)} · ${b.count} sessions`})}
+  const page=Math.max(1,safeInt(u.searchParams.get('page'))||1),limit=clamp(safeInt(u.searchParams.get('limit'))||13,1,16),start=(page-1)*(limit-1);return json({items:items.slice(start,start+limit)});
+}
