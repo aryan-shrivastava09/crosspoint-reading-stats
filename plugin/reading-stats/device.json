@@ -1,0 +1,31 @@
+{
+  "title": "Reading Stats",
+  "description": "Reading time, streaks and book progress",
+  "config": { "file": "config.json" },
+  "browse": {
+    "format": "json",
+    "url": "{cfg.server}/api/catalog?key={cfg.device_key}&page={page}&limit={limit}",
+    "method": "GET",
+    "items": "items",
+    "page_size": 12,
+    "fields": {
+      "title": "title",
+      "author": "subtitle",
+      "id": "id"
+    }
+  },
+  "events": {
+    "reader.session": {
+      "request": {
+        "method": "POST",
+        "url": "{cfg.server}/api/session",
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Device-Key": "{cfg.device_key}"
+        },
+        "body": "{\"event_id\":\"{event.id}\",\"book\":\"{event.book}\",\"document\":\"{event.document}\",\"start_time\":{event.start_time},\"end_time\":{event.end_time},\"duration_seconds\":{event.duration_seconds},\"start_progress_bp\":{event.start_progress_bp},\"end_progress_bp\":{event.end_progress_bp},\"event_ts\":{event.ts}}"
+      },
+      "connect": true
+    }
+  }
+}
