@@ -8,7 +8,7 @@
     "method": "GET",
     "headers": { "X-Device-Key": "{cfg.device_key}" },
     "items": "items",
-    "page_size": 12,
+    "page_size": 13,
     "fields": {
       "title": "title",
       "author": "subtitle",
@@ -23,8 +23,7 @@
         "url": "{cfg.server}/api/session",
         "headers": {
           "Content-Type": "application/json",
-          "X-Device-Key": "{cfg.device_key}"
-        },
+          "X-Device-Key": "{cfg.device_key}" },
         "body": "{\"event_id\":\"{event.id}\",\"book\":\"{event.book}\",\"document\":\"{event.document}\",\"start_time\":{event.start_time},\"end_time\":{event.end_time},\"duration_seconds\":{event.duration_seconds},\"start_progress_bp\":{event.start_progress_bp},\"end_progress_bp\":{event.end_progress_bp},\"event_ts\":{event.ts}}"
       },
       "connect": true
