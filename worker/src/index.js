@@ -10,6 +10,7 @@ const GOAL=2700;
 const COMPLETED_BOOKS_BASELINE=3;
 const pad=(s,n)=>String(s).length>=n?String(s).slice(0,n):String(s)+' '.repeat(n-String(s).length);
 const pair=(a,b)=>`${pad(a,16)} • ${b}`;
+const monthName=i=>['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i];
 
 export default{async fetch(req,env){const u=new URL(req.url);if(u.pathname==='/health')return json({ok:true});if(u.pathname==='/api/session'&&req.method==='POST')return ingest(req,env);if(u.pathname==='/api/catalog'&&req.method==='GET')return catalog(req,u,env);return json({error:'not found'},404)}};
 
@@ -64,16 +65,16 @@ async function insights(key,env){
   let best={d:'-',sec:0};for(const x of monthRows)if((+x.sec||0)>best.sec)best={d:x.d,sec:+x.sec||0};
   const active=daily.map(x=>x.d),aset=new Set(active);let streak=0,longest=0,run=0,previous='';for(const d of active){if(previous&&(new Date(d)-new Date(previous))/86400000===1)run++;else run=1;longest=Math.max(longest,run);previous=d}const nowSec=Math.floor(Date.now()/1000);for(let i=0;i<36600;i++){const d=day(nowSec-i*86400);if(aset.has(d))streak++;else if(i===0)continue;else break}
   const cur=Array(12).fill(0),old=Array(12).fill(0);for(const x of monthly){const [y,m]=x.m.split('-').map(Number);if(y===year)cur[m-1]=+x.sec||0;else if(y===prev)old[m-1]=+x.sec||0}
-  const yearSec=cur.reduce((a,b)=>a+b,0),prevSec=old.reduce((a,b)=>a+b,0);
+  const yearSec=cur.reduce((a,b)=>a+b,0),prevSec=old.reduce((a,b)=>a+b,0),bestMonth=cur.indexOf(Math.max(...cur));
   const quarters=[cur.slice(0,3).reduce((a,b)=>a+b,0),cur.slice(3,6).reduce((a,b)=>a+b,0),cur.slice(6,9).reduce((a,b)=>a+b,0),cur.slice(9,12).reduce((a,b)=>a+b,0)];
-  const maxQuarter=Math.max(...quarters,1),bestQuarter=quarters.indexOf(Math.max(...quarters));
+  const maxQuarter=Math.max(...quarters,1);
   const bestDate=best.d==='-'?'-':new Date(best.d+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:'UTC'});
   const items=[];
   items.push({id:'month',title:`THIS MONTH  ${dur(monthSec)}`,subtitle:pair(`${monthRows.length} active day${monthRows.length===1?'':'s'}`,`avg ${sd(avgDay)}/day`),description:'Current calendar month.'});
   items.push({id:'best',title:pair(`Best day ${bestDate}`,dur(best.sec)),subtitle:pair(`STREAK ${streak}d`,`LONGEST ${longest}d`),description:'Best day is the highest reading-time date in the current month.'});
   items.push({id:'year-head',title:`${year} ACTIVITY`,subtitle:' ',description:'Quarterly reading activity for the current calendar year.'});
   quarters.forEach((sec,i)=>items.push({id:'q'+(i+1),title:`Q${i+1}  ${bar(sec,maxQuarter,25)}  ${sd(sec)}`,subtitle:' ',description:`Quarter ${i+1}: ${dur(sec)} active reading time.`}));
-  items.push({id:'most',title:pair(`MOST ACTIVE Q${bestQuarter+1}`,dur(quarters[bestQuarter])),subtitle:' ',description:'Most active quarter of the current year.'});
+  items.push({id:'most',title:pair(`MOST ACTIVE ${monthName(bestMonth)}`,dur(cur[bestMonth])),subtitle:' ',description:'Most active month of the current year.'});
   items.push({id:'years-head',title:'YEAR TOTALS',subtitle:pair(`${year} ${dur(yearSec)}`,`${prev} ${dur(prevSec)}`),description:'Current and previous calendar year totals.'});
   items.push({id:'life',title:`LIFETIME  ${dur(+life.sec||0)}`,subtitle:pair(`${life.active_days||0} active day${(+life.active_days||0)===1?'':'s'}`,`${completedBooks} books read`),description:`Lifetime reading totals. Includes ${COMPLETED_BOOKS_BASELINE} books completed before session-based completion tracking, plus books subsequently detected at 99% or higher progress.`});
   return json({items});
