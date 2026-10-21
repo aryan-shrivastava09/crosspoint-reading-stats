@@ -5,4 +5,4 @@ compatibility_date = "2026-10-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "crosspoint-reading-stats"
-database_id = "PASTE_YOUR_D1_DATABASE_ID_HERE"
+database_id = "6462f8de-c516-4660-8f5f-d6fc449acc2f"
