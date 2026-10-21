@@ -8,6 +8,7 @@ const bar=(v,max,n=26)=>{const x=v>0&&max?Math.max(1,Math.round(clamp(v/max,0,1)
 const title=p=>String(p||'Unknown book').split('/').pop().replace(/\.(epub|pdf|txt|fb2|mobi)$/i,'');
 const GOAL=2700;
 const COMPLETED_BOOKS_BASELINE=3;
+const PAGE_SIZE=13;
 const pad=(s,n)=>String(s).length>=n?String(s).slice(0,n):String(s)+' '.repeat(n-String(s).length);
 const pair=(a,b)=>`${pad(a,16)} • ${b}`;
 const monthName=i=>['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i];
@@ -48,9 +49,10 @@ async function overview(key,env){
   days.forEach(d=>{const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${bar(byDay[d],scale,24)}  ${sd(byDay[d])}`,subtitle:' ',description:`${label}: ${dur(byDay[d])} active reading time.`})});
   items.push({id:'books-head',title:'RECENT BOOKS',subtitle:' '});
   for(const b of top)items.push({id:'b-'+b.last,title:title(b.book),subtitle:`${bar(b.pct,100,24)}  ${Math.round(b.pct)}%`,description:`${Math.round(b.pct)}% complete.`});
-  // The extra untitled item is deliberate pagination lookahead. CrossPoint trims it
-  // from page 1 and generates the firmware-owned "Next Page" navigation row.
-  items.push({id:'more',title:' ',subtitle:' '});
+  while(items.length<PAGE_SIZE-1)items.push({id:'space-'+items.length,title:' ',subtitle:' '});
+  items.push({id:'insights-head',title:'READING INSIGHTS',subtitle:' '});
+  // One extra titled row is pagination lookahead. Firmware trims it and renders Next Page >.
+  items.push({id:'page2-lookahead',title:'Reading insights',subtitle:' '});
   return json({items});
 }
 
@@ -70,10 +72,12 @@ async function insights(key,env){
   const quarters=[cur.slice(0,3).reduce((a,b)=>a+b,0),cur.slice(3,6).reduce((a,b)=>a+b,0),cur.slice(6,9).reduce((a,b)=>a+b,0),cur.slice(9,12).reduce((a,b)=>a+b,0)],maxQuarter=Math.max(...quarters,1);
   const bestDate=best.d==='-'?'-':new Date(best.d+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:'UTC'}),elapsedMonths=month+1,monthlyAvg=yearSec/elapsedMonths,avgSession=yearStats.sessions?yearStats.sec/yearStats.sessions:0;
   const items=[];
+  items.push({id:'monthly-head',title:'MONTHLY INSIGHTS',subtitle:' '});
   items.push({id:'month',title:`THIS MONTH  ${dur(monthSec)}`,subtitle:pair(`${monthRows.length} active day${monthRows.length===1?'':'s'}`,`avg ${sd(avgDay)}/day`),description:'Current calendar month.'});
   items.push({id:'best',title:pair(`Best day ${bestDate}`,dur(best.sec)),subtitle:pair(`STREAK ${streak}d`,`LONGEST ${longest}d`),description:'Best day is the highest reading-time date in the current month.'});
+  items.push({id:'yearly-head',title:'YEARLY INSIGHTS',subtitle:' '});
   items.push({id:'year-head',title:`${year} ACTIVITY`,subtitle:' ',description:'Quarterly reading activity for the current calendar year.'});
-  quarters.forEach((sec,i)=>items.push({id:'q'+(i+1),title:`Q${i+1}  ${bar(sec,maxQuarter,25)}  ${sd(sec)}`,subtitle:' ',description:`Quarter ${i+1}: ${dur(sec)} active reading time.`}));
+  quarters.forEach((sec,i)=>items.push({id:'q'+(i+1),title:`Q${i+1}  ${bar(sec,maxQuarter,23)}  ${sd(sec)}`,subtitle:' ',description:`Quarter ${i+1}: ${dur(sec)} active reading time.`}));
   items.push({id:'most',title:pair(`MOST ACTIVE ${monthName(bestMonth)}`,dur(cur[bestMonth])),subtitle:' ',description:'Most active month of the current year.'});
   items.push({id:'year-stats',title:`${year} STATS`,subtitle:pair(`Monthly avg ${sd(monthlyAvg)}`,`Active days ${yearStats.active_days||0}`),description:'Year-to-date monthly average and active reading days.'});
   items.push({id:'session-stats',title:pair(`Avg session ${sd(avgSession)}`,`Longest ${sd(yearStats.longest||0)}`),subtitle:' ',description:'Year-to-date average and longest reading session.'});
