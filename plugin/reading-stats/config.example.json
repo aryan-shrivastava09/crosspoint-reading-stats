@@ -1,0 +1,4 @@
+{
+  "server": "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev",
+  "device_key": "CHANGE-ME-TO-A-LONG-RANDOM-SECRET"
+}
