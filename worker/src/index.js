@@ -3,15 +3,13 @@ const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const safeInt=v=>Number.isFinite(Number(v))?Math.trunc(Number(v)):0;
 const day=ts=>new Date(ts*1000).toISOString().slice(0,10);
 const sd=s=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h?`${h}h${m?String(m).padStart(2,'0')+'m':''}`:`${m}m`};
-const dur=s=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h?`${h}h ${String(m).padStart(2,'0')}m`:`${m} min`};
-const compact=s=>{s=Math.max(0,Math.round(s));if(s<3600)return`${Math.round(s/60)}m`;const h=Math.floor(s/3600);return`${h}h`};
-const bar=(v,max,n=18)=>{const x=v>0&&max?Math.max(1,Math.round(clamp(v/max,0,1)*n)):0;return'='.repeat(x)+'-'.repeat(n-x)};
+const dur=s=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h?`${h}h ${String(m).padStart(2,'0')}m`:`${m}m`};
+const bar=(v,max,n=26)=>{const x=v>0&&max?Math.max(1,Math.round(clamp(v/max,0,1)*n)):0;return'='.repeat(x)+'-'.repeat(n-x)};
 const title=p=>String(p||'Unknown book').split('/').pop().replace(/\.(epub|pdf|txt|fb2|mobi)$/i,'');
 const GOAL=2700;
 const COMPLETED_BOOKS_BASELINE=3;
 const pad=(s,n)=>String(s).length>=n?String(s).slice(0,n):String(s)+' '.repeat(n-String(s).length);
 const pair=(a,b)=>`${pad(a,16)} • ${b}`;
-const monthName=i=>['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i];
 
 export default{async fetch(req,env){const u=new URL(req.url);if(u.pathname==='/health')return json({ok:true});if(u.pathname==='/api/session'&&req.method==='POST')return ingest(req,env);if(u.pathname==='/api/catalog'&&req.method==='GET')return catalog(req,u,env);return json({error:'not found'},404)}};
 
@@ -43,12 +41,14 @@ async function overview(key,env){
   const activeDays=(await env.DB.prepare(`SELECT DISTINCT date(end_time,'unixepoch') d FROM sessions WHERE device_key=? ORDER BY d`).bind(key).all()).results||[];
   const aset=new Set(activeDays.map(x=>x.d));let streak=0;for(let i=0;i<36600;i++){const d=day(now-i*86400);if(aset.has(d))streak++;else if(i===0)continue;else break}
   const books=new Map();for(const s of latest.results||[]){const id=s.document||s.book;if(!books.has(id))books.set(id,{book:s.book,pct:(+s.end_progress_bp||0)/100,last:+s.end_time||0})}
-  const top=[...books.values()].sort((a,b)=>b.last-a.last).slice(0,3),scale=Math.max(GOAL,...Object.values(byDay),1),goalPct=Math.round(clamp(todaySec/GOAL*100,0,100));
+  const top=[...books.values()].sort((a,b)=>b.last-a.last).slice(0,3),scale=Math.max(...Object.values(byDay),1),goalPct=Math.round(clamp(todaySec/GOAL*100,0,100));
   const items=[];
   items.push({id:'today',title:`TODAY ${sd(todaySec)}    GOAL ${sd(todaySec)}/45m ${goalPct}%`,subtitle:`${todayCount} session${todayCount===1?'':'s'}       STREAK ${streak}d`,description:'Today, daily goal and current reading streak.'});
-  days.forEach((d,i)=>{const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${bar(byDay[d],scale,18)}  ${sd(byDay[d])}`,subtitle:i===0?`LAST 7 DAYS  ${dur(week)}`:' ',description:`${label}: ${dur(byDay[d])} active reading time.`})});
-  for(let i=0;i<3;i++){const b=top[i];if(b)items.push({id:'b-'+b.last,title:`${i===0?'RECENT  ':''}${title(b.book)}`,subtitle:`${bar(b.pct,100,22)}  ${Math.round(b.pct)}%`,description:`${Math.round(b.pct)}% complete.`});else items.push({id:'book-empty-'+i,title:i===0?'RECENT BOOKS':' ',subtitle:' ',description:'No additional recent book yet.'})}
-  items.push({id:'insights',title:'READING INSIGHTS',subtitle:'Year, month and lifetime activity  >',description:'Open the next page for reading insights.'});
+  items.push({id:'week-head',title:`LAST 7 DAYS  ${sd(week)}`,subtitle:' ',description:'Reading activity over the last seven days.'});
+  days.forEach(d=>{const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${bar(byDay[d],scale,26)}  ${sd(byDay[d])}`,subtitle:' ',description:`${label}: ${dur(byDay[d])} active reading time.`})});
+  items.push({id:'books-head',title:'RECENT BOOKS',subtitle:' ',description:'Three most recently read books.'});
+  for(let i=0;i<3;i++){const b=top[i];if(b)items.push({id:'b-'+b.last,title:title(b.book),subtitle:`${bar(b.pct,100,30)}  ${Math.round(b.pct)}%`,description:`${Math.round(b.pct)}% complete.`});else items.push({id:'book-empty-'+i,title:' ',subtitle:' ',description:'No additional recent book yet.'})}
+  items.push({id:'insights',title:'READING INSIGHTS  >',subtitle:' ',description:'Open the next page for reading insights.'});
   items.push({id:'more',title:' ',subtitle:' ',description:'Pagination lookahead.'});
   return json({items});
 }
@@ -64,17 +64,17 @@ async function insights(key,env){
   let best={d:'-',sec:0};for(const x of monthRows)if((+x.sec||0)>best.sec)best={d:x.d,sec:+x.sec||0};
   const active=daily.map(x=>x.d),aset=new Set(active);let streak=0,longest=0,run=0,previous='';for(const d of active){if(previous&&(new Date(d)-new Date(previous))/86400000===1)run++;else run=1;longest=Math.max(longest,run);previous=d}const nowSec=Math.floor(Date.now()/1000);for(let i=0;i<36600;i++){const d=day(nowSec-i*86400);if(aset.has(d))streak++;else if(i===0)continue;else break}
   const cur=Array(12).fill(0),old=Array(12).fill(0);for(const x of monthly){const [y,m]=x.m.split('-').map(Number);if(y===year)cur[m-1]=+x.sec||0;else if(y===prev)old[m-1]=+x.sec||0}
-  const yearSec=cur.reduce((a,b)=>a+b,0),prevSec=old.reduce((a,b)=>a+b,0),maxSec=Math.max(...cur,1),bestMonth=cur.indexOf(Math.max(...cur));
-  const levels=5,chart=[];for(let row=levels;row>=1;row--){let line='';for(let i=0;i<12;i++){const h=cur[i]>0?Math.max(1,Math.round(cur[i]/maxSec*levels)):0;const label=h===row?compact(cur[i]).slice(0,3):'';line+=pad(label,3)}chart.push(line.trimEnd()||' ')}
-  const labels='J  F  M  A  M  J  J  A  S  O  N  D';
+  const yearSec=cur.reduce((a,b)=>a+b,0),prevSec=old.reduce((a,b)=>a+b,0);
+  const quarters=[cur.slice(0,3).reduce((a,b)=>a+b,0),cur.slice(3,6).reduce((a,b)=>a+b,0),cur.slice(6,9).reduce((a,b)=>a+b,0),cur.slice(9,12).reduce((a,b)=>a+b,0)];
+  const maxQuarter=Math.max(...quarters,1),bestQuarter=quarters.indexOf(Math.max(...quarters));
   const bestDate=best.d==='-'?'-':new Date(best.d+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:'UTC'});
   const items=[];
-  items.push({id:'month',title:`THIS MONTH  ${dur(monthSec)}`,subtitle:pair(`${monthRows.length} active days`,`avg ${sd(avgDay)}/day`),description:'Current calendar month.'});
+  items.push({id:'month',title:`THIS MONTH  ${dur(monthSec)}`,subtitle:pair(`${monthRows.length} active day${monthRows.length===1?'':'s'}`,`avg ${sd(avgDay)}/day`),description:'Current calendar month.'});
   items.push({id:'best',title:pair(`Best day ${bestDate}`,dur(best.sec)),subtitle:pair(`STREAK ${streak}d`,`LONGEST ${longest}d`),description:'Best day is the highest reading-time date in the current month.'});
-  items.push({id:'year-head',title:`${year} ACTIVITY`,subtitle:' ',description:'Monthly reading activity for the current calendar year.'});
-  chart.forEach((line,i)=>items.push({id:'chart-'+i,title:line,subtitle:' ',description:'Annual activity chart.'}));
-  items.push({id:'months',title:labels,subtitle:' ',description:'January through December.'});
-  items.push({id:'most',title:pair(`MOST ACTIVE ${monthName(bestMonth)}`,dur(cur[bestMonth])),subtitle:pair(`${year} ${dur(yearSec)}`,`${prev} ${dur(prevSec)}`),description:'Most active month and current/previous year totals.'});
-  items.push({id:'life',title:`LIFETIME  ${dur(+life.sec||0)}`,subtitle:pair(`${life.active_days||0} active days`,`${completedBooks} books read`),description:`Lifetime reading totals. Includes ${COMPLETED_BOOKS_BASELINE} books completed before session-based completion tracking, plus books subsequently detected at 99% or higher progress.`});
+  items.push({id:'year-head',title:`${year} ACTIVITY`,subtitle:' ',description:'Quarterly reading activity for the current calendar year.'});
+  quarters.forEach((sec,i)=>items.push({id:'q'+(i+1),title:`Q${i+1}  ${bar(sec,maxQuarter,25)}  ${sd(sec)}`,subtitle:' ',description:`Quarter ${i+1}: ${dur(sec)} active reading time.`}));
+  items.push({id:'most',title:pair(`MOST ACTIVE Q${bestQuarter+1}`,dur(quarters[bestQuarter])),subtitle:' ',description:'Most active quarter of the current year.'});
+  items.push({id:'years-head',title:'YEAR TOTALS',subtitle:pair(`${year} ${dur(yearSec)}`,`${prev} ${dur(prevSec)}`),description:'Current and previous calendar year totals.'});
+  items.push({id:'life',title:`LIFETIME  ${dur(+life.sec||0)}`,subtitle:pair(`${life.active_days||0} active day${(+life.active_days||0)===1?'':'s'}`,`${completedBooks} books read`),description:`Lifetime reading totals. Includes ${COMPLETED_BOOKS_BASELINE} books completed before session-based completion tracking, plus books subsequently detected at 99% or higher progress.`});
   return json({items});
 }
