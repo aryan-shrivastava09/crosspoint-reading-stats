@@ -8,6 +8,7 @@ const compact=s=>{s=Math.max(0,Math.round(s));if(s<3600)return`${Math.round(s/60
 const bar=(v,max,n=18)=>{const x=v>0&&max?Math.max(1,Math.round(clamp(v/max,0,1)*n)):0;return'='.repeat(x)+'-'.repeat(n-x)};
 const title=p=>String(p||'Unknown book').split('/').pop().replace(/\.(epub|pdf|txt|fb2|mobi)$/i,'');
 const GOAL=2700;
+const COMPLETED_BOOKS_BASELINE=3;
 const pad=(s,n)=>String(s).length>=n?String(s).slice(0,n):String(s)+' '.repeat(n-String(s).length);
 const pair=(a,b)=>`${pad(a,16)} • ${b}`;
 const monthName=i=>['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][i];
@@ -58,6 +59,7 @@ async function insights(key,env){
   const monthly=(await env.DB.prepare(`SELECT strftime('%Y-%m',end_time,'unixepoch') m, SUM(duration_seconds) sec FROM sessions WHERE device_key=? AND strftime('%Y',end_time,'unixepoch') IN (?,?) GROUP BY m ORDER BY m`).bind(key,String(year),String(prev)).all()).results||[];
   const life=(await env.DB.prepare(`SELECT COALESCE(SUM(duration_seconds),0) sec, COUNT(DISTINCT date(end_time,'unixepoch')) active_days FROM sessions WHERE device_key=?`).bind(key).first())||{sec:0,active_days:0};
   const finished=(await env.DB.prepare(`SELECT COUNT(*) n FROM (SELECT COALESCE(NULLIF(document,''),book) k, MAX(end_progress_bp) p FROM sessions WHERE device_key=? GROUP BY k HAVING p>=9900)`).bind(key).first())||{n:0};
+  const completedBooks=COMPLETED_BOOKS_BASELINE+(+finished.n||0);
   const monthRows=daily.filter(x=>String(x.d).startsWith(monthPrefix)),monthSec=monthRows.reduce((a,x)=>a+(+x.sec||0),0),avgDay=monthRows.length?monthSec/monthRows.length:0;
   let best={d:'-',sec:0};for(const x of monthRows)if((+x.sec||0)>best.sec)best={d:x.d,sec:+x.sec||0};
   const active=daily.map(x=>x.d),aset=new Set(active);let streak=0,longest=0,run=0,previous='';for(const d of active){if(previous&&(new Date(d)-new Date(previous))/86400000===1)run++;else run=1;longest=Math.max(longest,run);previous=d}const nowSec=Math.floor(Date.now()/1000);for(let i=0;i<36600;i++){const d=day(nowSec-i*86400);if(aset.has(d))streak++;else if(i===0)continue;else break}
@@ -73,6 +75,6 @@ async function insights(key,env){
   chart.forEach((line,i)=>items.push({id:'chart-'+i,title:line,subtitle:' ',description:'Annual activity chart.'}));
   items.push({id:'months',title:labels,subtitle:' ',description:'January through December.'});
   items.push({id:'most',title:pair(`MOST ACTIVE ${monthName(bestMonth)}`,dur(cur[bestMonth])),subtitle:pair(`${year} ${dur(yearSec)}`,`${prev} ${dur(prevSec)}`),description:'Most active month and current/previous year totals.'});
-  items.push({id:'life',title:`LIFETIME  ${dur(+life.sec||0)}`,subtitle:pair(`${life.active_days||0} active days`,`${finished.n||0} books read`),description:'Lifetime reading totals. Books read currently uses completed reading progress until direct SD /read-folder enumeration is available to the plugin.'});
+  items.push({id:'life',title:`LIFETIME  ${dur(+life.sec||0)}`,subtitle:pair(`${life.active_days||0} active days`,`${completedBooks} books read`),description:`Lifetime reading totals. Includes ${COMPLETED_BOOKS_BASELINE} books completed before session-based completion tracking, plus books subsequently detected at 99% or higher progress.`});
   return json({items});
 }
