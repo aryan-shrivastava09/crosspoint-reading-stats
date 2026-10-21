@@ -41,4 +41,4 @@ The backend stores the SD book path, document hash, active session timestamps/du
 
 ## CrossPoint behaviour
 `reader.session` counts successful ordinary forward turns only. A displayed page contributes after 2 seconds and each dwell is capped at 30 minutes. Sessions require at least 10 active seconds. Delivery is at-least-once, so the Worker deduplicates on CrossPoint's event id. With `connect: true`, queued sessions can be delivered during sleep entry when battery/network conditions permit.
-Deployment trigger te
+Deployment trigger
