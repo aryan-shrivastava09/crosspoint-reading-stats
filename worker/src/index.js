@@ -46,9 +46,11 @@ async function overview(key,env){
   const items=[];
   items.push({id:'today',title:`TODAY ${sd(todaySec)}    GOAL ${sd(todaySec)}/45m ${goalPct}%`,subtitle:`LAST 7 DAYS ${sd(week)}   • STREAK ${streak}d`,description:`${todayCount} session${todayCount===1?'':'s'} today. Last seven days: ${dur(week)}.`});
   days.forEach(d=>{const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${bar(byDay[d],scale,24)}  ${sd(byDay[d])}`,subtitle:' ',description:`${label}: ${dur(byDay[d])} active reading time.`})});
-  for(let i=0;i<top.length;i++){const b=top[i];items.push({id:'b-'+b.last,title:`${i===0?'RECENT · ':''}${title(b.book)}`,subtitle:`${bar(b.pct,100,24)}  ${Math.round(b.pct)}%`,description:`${Math.round(b.pct)}% complete.`})}
-  items.push({id:'insights',title:'READING INSIGHTS  >',subtitle:' ',description:'Open the next page for reading insights.'});
-  items.push({id:'more',title:' ',subtitle:' ',description:'Pagination lookahead.'});
+  items.push({id:'books-head',title:'RECENT BOOKS',subtitle:' '});
+  for(const b of top)items.push({id:'b-'+b.last,title:title(b.book),subtitle:`${bar(b.pct,100,24)}  ${Math.round(b.pct)}%`,description:`${Math.round(b.pct)}% complete.`});
+  // The extra untitled item is deliberate pagination lookahead. CrossPoint trims it
+  // from page 1 and generates the firmware-owned "Next Page" navigation row.
+  items.push({id:'more',title:' ',subtitle:' '});
   return json({items});
 }
 
