@@ -44,20 +44,19 @@ async function overview(key,env){
   const books=new Map();for(const s of latest.results||[]){const id=s.document||s.book;if(!books.has(id))books.set(id,{book:s.book,pct:(+s.end_progress_bp||0)/100,last:+s.end_time||0})}
   const top=[...books.values()].sort((a,b)=>b.last-a.last).slice(0,3),scale=Math.max(...Object.values(byDay),1),goalPct=Math.round(clamp(todaySec/GOAL*100,0,100));
   const items=[];
-  items.push({id:'today',title:`TODAY ${sd(todaySec)}    GOAL ${sd(todaySec)}/45m ${goalPct}%`,subtitle:`${todayCount} session${todayCount===1?'':'s'}       STREAK ${streak}d`,description:'Today, daily goal and current reading streak.'});
-  items.push({id:'week-head',title:`LAST 7 DAYS  ${sd(week)}`,subtitle:' ',description:'Reading activity over the last seven days.'});
-  days.forEach(d=>{const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${bar(byDay[d],scale,26)}  ${sd(byDay[d])}`,subtitle:' ',description:`${label}: ${dur(byDay[d])} active reading time.`})});
-  items.push({id:'books-head',title:'RECENT BOOKS',subtitle:' ',description:'Three most recently read books.'});
-  for(let i=0;i<3;i++){const b=top[i];if(b)items.push({id:'b-'+b.last,title:title(b.book),subtitle:`${bar(b.pct,100,30)}  ${Math.round(b.pct)}%`,description:`${Math.round(b.pct)}% complete.`});else items.push({id:'book-empty-'+i,title:' ',subtitle:' ',description:'No additional recent book yet.'})}
+  items.push({id:'today',title:`TODAY ${sd(todaySec)}    GOAL ${sd(todaySec)}/45m ${goalPct}%`,subtitle:`LAST 7 DAYS ${sd(week)}   • STREAK ${streak}d`,description:`${todayCount} session${todayCount===1?'':'s'} today. Last seven days: ${dur(week)}.`});
+  days.forEach(d=>{const label=new Date(d+'T12:00:00Z').toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'});items.push({id:'d-'+d,title:`${label}  ${bar(byDay[d],scale,24)}  ${sd(byDay[d])}`,subtitle:' ',description:`${label}: ${dur(byDay[d])} active reading time.`})});
+  for(let i=0;i<top.length;i++){const b=top[i];items.push({id:'b-'+b.last,title:`${i===0?'RECENT · ':''}${title(b.book)}`,subtitle:`${bar(b.pct,100,24)}  ${Math.round(b.pct)}%`,description:`${Math.round(b.pct)}% complete.`})}
   items.push({id:'insights',title:'READING INSIGHTS  >',subtitle:' ',description:'Open the next page for reading insights.'});
   items.push({id:'more',title:' ',subtitle:' ',description:'Pagination lookahead.'});
   return json({items});
 }
 
 async function insights(key,env){
-  const now=new Date(),year=now.getUTCFullYear(),prev=year-1,month=now.getUTCMonth(),monthPrefix=`${year}-${String(month+1).padStart(2,'0')}`;
+  const now=new Date(),year=now.getUTCFullYear(),prev=year-1,month=now.getUTCMonth(),monthPrefix=`${year}-${String(month+1).padStart(2,'0')}`,yearStart=Math.floor(Date.UTC(year,0,1)/1000),nextYear=Math.floor(Date.UTC(year+1,0,1)/1000);
   const daily=(await env.DB.prepare(`SELECT date(end_time,'unixepoch') d, SUM(duration_seconds) sec FROM sessions WHERE device_key=? GROUP BY d ORDER BY d`).bind(key).all()).results||[];
   const monthly=(await env.DB.prepare(`SELECT strftime('%Y-%m',end_time,'unixepoch') m, SUM(duration_seconds) sec FROM sessions WHERE device_key=? AND strftime('%Y',end_time,'unixepoch') IN (?,?) GROUP BY m ORDER BY m`).bind(key,String(year),String(prev)).all()).results||[];
+  const yearStats=(await env.DB.prepare(`SELECT COALESCE(SUM(duration_seconds),0) sec, COUNT(*) sessions, COUNT(DISTINCT date(end_time,'unixepoch')) active_days, COALESCE(MAX(duration_seconds),0) longest FROM sessions WHERE device_key=? AND end_time>=? AND end_time<?`).bind(key,yearStart,nextYear).first())||{sec:0,sessions:0,active_days:0,longest:0};
   const life=(await env.DB.prepare(`SELECT COALESCE(SUM(duration_seconds),0) sec, COUNT(DISTINCT date(end_time,'unixepoch')) active_days FROM sessions WHERE device_key=?`).bind(key).first())||{sec:0,active_days:0};
   const finished=(await env.DB.prepare(`SELECT COUNT(*) n FROM (SELECT COALESCE(NULLIF(document,''),book) k, MAX(end_progress_bp) p FROM sessions WHERE device_key=? GROUP BY k HAVING p>=9900)`).bind(key).first())||{n:0};
   const completedBooks=COMPLETED_BOOKS_BASELINE+(+finished.n||0);
@@ -66,15 +65,16 @@ async function insights(key,env){
   const active=daily.map(x=>x.d),aset=new Set(active);let streak=0,longest=0,run=0,previous='';for(const d of active){if(previous&&(new Date(d)-new Date(previous))/86400000===1)run++;else run=1;longest=Math.max(longest,run);previous=d}const nowSec=Math.floor(Date.now()/1000);for(let i=0;i<36600;i++){const d=day(nowSec-i*86400);if(aset.has(d))streak++;else if(i===0)continue;else break}
   const cur=Array(12).fill(0),old=Array(12).fill(0);for(const x of monthly){const [y,m]=x.m.split('-').map(Number);if(y===year)cur[m-1]=+x.sec||0;else if(y===prev)old[m-1]=+x.sec||0}
   const yearSec=cur.reduce((a,b)=>a+b,0),prevSec=old.reduce((a,b)=>a+b,0),bestMonth=cur.indexOf(Math.max(...cur));
-  const quarters=[cur.slice(0,3).reduce((a,b)=>a+b,0),cur.slice(3,6).reduce((a,b)=>a+b,0),cur.slice(6,9).reduce((a,b)=>a+b,0),cur.slice(9,12).reduce((a,b)=>a+b,0)];
-  const maxQuarter=Math.max(...quarters,1);
-  const bestDate=best.d==='-'?'-':new Date(best.d+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:'UTC'});
+  const quarters=[cur.slice(0,3).reduce((a,b)=>a+b,0),cur.slice(3,6).reduce((a,b)=>a+b,0),cur.slice(6,9).reduce((a,b)=>a+b,0),cur.slice(9,12).reduce((a,b)=>a+b,0)],maxQuarter=Math.max(...quarters,1);
+  const bestDate=best.d==='-'?'-':new Date(best.d+'T12:00:00Z').toLocaleDateString('en-GB',{day:'numeric',month:'short',timeZone:'UTC'}),elapsedMonths=month+1,monthlyAvg=yearSec/elapsedMonths,avgSession=yearStats.sessions?yearStats.sec/yearStats.sessions:0;
   const items=[];
   items.push({id:'month',title:`THIS MONTH  ${dur(monthSec)}`,subtitle:pair(`${monthRows.length} active day${monthRows.length===1?'':'s'}`,`avg ${sd(avgDay)}/day`),description:'Current calendar month.'});
   items.push({id:'best',title:pair(`Best day ${bestDate}`,dur(best.sec)),subtitle:pair(`STREAK ${streak}d`,`LONGEST ${longest}d`),description:'Best day is the highest reading-time date in the current month.'});
   items.push({id:'year-head',title:`${year} ACTIVITY`,subtitle:' ',description:'Quarterly reading activity for the current calendar year.'});
   quarters.forEach((sec,i)=>items.push({id:'q'+(i+1),title:`Q${i+1}  ${bar(sec,maxQuarter,25)}  ${sd(sec)}`,subtitle:' ',description:`Quarter ${i+1}: ${dur(sec)} active reading time.`}));
   items.push({id:'most',title:pair(`MOST ACTIVE ${monthName(bestMonth)}`,dur(cur[bestMonth])),subtitle:' ',description:'Most active month of the current year.'});
+  items.push({id:'year-stats',title:`${year} STATS`,subtitle:pair(`Monthly avg ${sd(monthlyAvg)}`,`Active days ${yearStats.active_days||0}`),description:'Year-to-date monthly average and active reading days.'});
+  items.push({id:'session-stats',title:pair(`Avg session ${sd(avgSession)}`,`Longest ${sd(yearStats.longest||0)}`),subtitle:' ',description:'Year-to-date average and longest reading session.'});
   items.push({id:'years-head',title:'YEAR TOTALS',subtitle:pair(`${year} ${dur(yearSec)}`,`${prev} ${dur(prevSec)}`),description:'Current and previous calendar year totals.'});
   items.push({id:'life',title:`LIFETIME  ${dur(+life.sec||0)}`,subtitle:pair(`${life.active_days||0} active day${(+life.active_days||0)===1?'':'s'}`,`${completedBooks} books read`),description:`Lifetime reading totals. Includes ${COMPLETED_BOOKS_BASELINE} books completed before session-based completion tracking, plus books subsequently detected at 99% or higher progress.`});
   return json({items});
